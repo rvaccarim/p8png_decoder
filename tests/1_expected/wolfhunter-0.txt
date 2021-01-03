@@ -1,0 +1,1292 @@
+
+-- game constants
+k_bleed_damage = 10
+f_count = 0
+
+-- ui constants
+narrator_box_size = 48
+narrator_padding = 8
+narrator_box_y = 128 - narrator_box_size
+
+-->8
+-- game state
+-- create the two units and 
+-- provide helper functions to switch turns.
+
+function new_game_state()
+
+  -- create player unit
+  local player_events = {"menu"}
+  local player_items = {"crossbow", "elixir", "silver knife"}
+  local player_hp = 100
+  local player = new_unit("player", player_hp, player_events, player_items)
+
+  -- create enemy unit
+  local enemy_events = {"slash", "dark charge", "strong defend", "raging strike", "ravage", "cleave"}
+  local enemy_hp = 400
+  local enemy = new_unit("werewolf", enemy_hp, enemy_events)
+
+  -- game state
+  local state = {
+    player = player,
+    enemy = enemy,
+    is_player_turn = true
+  }
+
+  -- which unit moves this turn?
+  state.current_unit = function(this)
+    if this.is_player_turn then
+      return this.player
+    else
+      return this.enemy
+    end
+  end
+
+  -- which is the current target?
+  state.current_target = function(this)
+    if this.is_player_turn then
+      return this.enemy
+    else
+      return this.player
+    end
+  end
+
+  -- start a new turn
+  state.start_turn = function(this, is_player_turn)
+    this.is_player_turn = is_player_turn
+    this:current_unit():on_turn_start()
+    unit_event = generate_event(this:current_unit():next_event(), this:current_unit(), this:current_target())
+    sequence:add(unit_event)
+    sequence:add(new_end_turn_event())
+  end
+
+  -- switch turn to the other player
+  state.switch_turn = function(this)
+    this:start_turn(not this.is_player_turn)
+  end
+
+  return state
+end
+
+-->8
+-- units
+
+function new_unit(name, hp, event_pool, items)
+  local unit = {
+
+    -- basic info
+    name=name,
+    hp=hp,
+    max_hp=hp,
+    mana=5,
+    max_mana=5,
+    items=items,
+
+    -- used to animate the unit
+    animation=nil,
+    vfx_animation=nil,
+
+    -- event management
+    event_pool=event_pool,
+    event_queue={},
+
+    --combat status
+    block = 0, -- block incoming damage for 1 turn.
+    bleed = 0, -- bleeding, taking damage each turn.
+    blind = 0, -- if blind, unit's attacks will miss
+    vulnerable = false, -- take double damage from attacks.
+  }
+
+  -- copy the event pool into the event queue
+  unit.enqueue_random_events_from_pool = function(this)
+    this.event_queue = {}
+    for i=1, #this.event_pool do
+      local r_index = flr(rnd(#this.event_queue)) + 1
+      add(this.event_queue, this.event_pool[i], r_index)
+    end
+  end
+
+  -- next event in the queue
+  unit.next_event = function(this)
+    -- if empty, repopulate the queue.
+    if #this.event_queue == 0 then this:enqueue_random_events_from_pool() end
+    -- pop first item from the queue.
+    local event = this.event_queue[1]
+    del(this.event_queue, event)
+    return event
+  end
+
+
+  -- insert new event into unit's sequence.
+  unit.insert_event = function(this, event)
+    add(this.event_queue, event, 1)
+  end
+
+  unit.on_turn_start = function(this)
+
+    if this.vulnerable then
+      sequence:add(new_info_event(unit.name.." is no longer vulnerable."))
+    end
+
+    if this.bleed == 1 then
+      sequence:add(new_info_event(unit.name.." is no longer bleeding."))
+    end
+
+    if this.blind == 1 then
+      sequence:add(new_info_event(unit.name.." is no longer blinded."))
+    end
+
+    -- reset unit status effects.
+    this.vulnerable = false
+    this.block = 0
+    this.bleed -= 1
+    this.blind -= 1
+
+  end
+
+  -- attach new animation to this unit.
+  unit.animate = function(this, animation)
+    this.animation = animation
+  end
+
+  return unit
+end
+
+-->8
+-- menu and ui
+
+-- print a body of text wrapped around
+function print_wrapped(text, x, y, color)
+
+  col_width = 112 -- how long each column should be.
+  line_arr = split(text," ")
+  cursor(x, y, 7)
+  line = ""
+ 
+  for word in all(line_arr) do
+    word_str = tostring(word) -- case to string or it fails on numbers
+    prospect_length = (#line + #word_str + 1) * 4
+    if (prospect_length >= col_width) do
+      print(line, x, y, color)
+      line = word_str
+      y += 8
+    else
+      if (#line == 0) do
+        line = word_str
+      else
+        line = line.." "..word_str
+      end
+    end
+  end
+  print(line, x, y, color)
+
+end
+
+-- return true/false each n_frames 
+function toggle_per_n_frames(n_frames)
+ mod_count = f_count % (n_frames * 2)
+ return mod_count < n_frames
+end
+
+-- main 'action' menu
+function new_menu(items, n_columns, back_action, show_desc)
+
+  -- model the menu
+  local menu = {
+    items = items,
+    n_columns = n_columns,
+    back_action = back_action,
+    show_desc = show_desc,
+
+    -- menu positioning
+    selected_index = 1,
+    x_origin = 8,
+    x_gap = 42,
+    y_origin = narrator_box_y + 8,
+    y_gap = 12,
+  }
+
+  -- update the menu with arrow keys
+  menu.update = function(this)
+
+    -- translate selected index into x and y.
+    local translated_xy = this:translate_xy(this.selected_index)
+    local pos_x = translated_xy["x"]
+    local pos_y = translated_xy["y"]
+
+    -- move the cursor and cap its positions.
+    if btnp(0) then pos_x = max(0, pos_x - 1) end
+    if btnp(1) then pos_x = min(this.n_columns - 1, pos_x + 1) end
+    if btnp(2) then pos_y = max(0, pos_y - 1) end
+    if btnp(3) then pos_y = min(flr(#this.items / this.n_columns) - 1, pos_y + 1) end
+
+    --play selection sfx
+    if btnp(0) or btnp(1) or btnp(2) or btnp(3) then sfx(1) end
+
+    -- translate x and y back into selected index.
+    this.selected_index = this.n_columns * pos_y + pos_x + 1
+
+    -- execute the selected event
+    if btnp(5) then 
+      local selected_event_id = this.items[this.selected_index]
+      local selected_event = generate_event(selected_event_id, state.player, state.enemy)
+      sequence:insert(selected_event)
+      sfx(0)
+    end
+
+    -- execute the back function
+    if btnp(4) and this.back_action then
+      sequence:insert(new_event("menu"))
+      sequence:next()
+      sfx(2)
+    end
+  end
+
+  -- render the current menu
+  menu.draw = function(this)
+
+    this:draw_desc()
+    draw_narrator_box()
+
+    for i=1, #this.items do
+      local pos_x = this:translate_xy(i)["x"] * this.x_gap + this.x_origin
+      local pos_y = this:translate_xy(i)["y"] * this.y_gap + this.y_origin
+      
+      -- print the selected menu item
+      if (this.selected_index == i) then prefix = " " else prefix = "  " end
+      print(prefix..this.items[i], pos_x, pos_y, 7)
+    end
+  end
+
+  -- draw a sub-menu with description of the item.
+  menu.draw_desc = function(this)
+    if not this.show_desc then return end
+
+    local gap = 1
+    local height = 12
+    local box_y = narrator_box_y-gap-height
+    rectfill(0, box_y, 128, narrator_box_y-gap, 0)
+
+    local text_gap = 4
+    local desc = get_event_desc(this.items[this.selected_index])
+    local origin_x = text_gap
+    local origin_y = box_y + text_gap
+    print_wrapped(desc, origin_x, origin_y, 7)
+  end
+
+  menu.translate_xy = function(this, i)
+    local x_index = (i - 1) % this.n_columns
+    local y_index = ceil(i / this.n_columns) - 1
+    return {x = x_index, y = y_index}
+  end
+
+  return menu
+end
+
+-- print something in the center of the screen.
+function print_x_centered(text, y, color)
+  local x = (128 - #text * 4) / 2
+  print(text, x, y, color)
+end
+
+-- draw a flashing caret.
+function draw_caret(caret_text)
+ if (toggle_per_n_frames(15)) then
+  if not caret_text then caret_text = "press " end
+  caret_x = 128 - narrator_padding - #caret_text * 4 - 3
+  caret_y = 128 - narrator_padding - 6
+  print(caret_text, caret_x, caret_y, 7)
+ end
+end
+
+function draw_narrator_box()
+ -- create a background for the narrator's box.
+ rectfill(0, narrator_box_y, 128, 128, 0)
+ local border_pad = 1
+ rect(border_pad, narrator_box_y + border_pad, 127 - border_pad, 127 - border_pad, 7)
+end
+
+function draw_hp_bar(unit, x, y, width)
+  local height = 1
+
+  -- draw bar base
+  rectfill(x, y, x + width, y + height, 0)
+
+  -- draw hp bar
+  if unit.hp > 0 then
+    local life_percent = unit.hp / unit.max_hp
+    local life_width = ceil(width * life_percent)
+    local life_color = 11
+
+    if life_percent < 0.5 then life_color = 9 end
+    if life_percent < 0.2 then life_color = 8 end
+
+    rectfill(x, y, x + life_width, y + height, life_color)
+  end
+end
+
+function draw_status_box(unit, spr_x, is_inverted)
+  local box_pad = 4
+  local side_pad = 2
+  local status_box_width = 72
+  local status_box_height = 24
+  local pos_x = 128 - status_box_width - side_pad
+  local pos_y = narrator_box_y - status_box_height - side_pad - 1
+
+  if is_inverted then
+    pos_x = side_pad
+    pos_y = side_pad
+  end
+
+  local text_color = 7
+  local x_cursor = pos_x + box_pad
+  local y_cursor = pos_y + box_pad
+
+  -- unit name
+  print(unit.name, x_cursor, y_cursor, text_color)
+
+  -- unit health
+  local hp_str = ""..unit.hp.." hp"
+  local hp_x = pos_x + status_box_width - box_pad - (#hp_str * 4) + 1
+  print(hp_str, hp_x, y_cursor, text_color)
+
+  -- unit health bar
+  y_cursor += 8
+  draw_hp_bar(unit, x_cursor, y_cursor, status_box_width - box_pad * 2)
+
+  -- unit mana
+  y_cursor += 4
+  local mana_str = unit.mana.." mana"
+  local mana_x = pos_x + status_box_width - box_pad - (#mana_str * 4) + 1
+  print(mana_str, mana_x, y_cursor, 12)
+
+end
+
+function draw_unit(unit, is_inverted)
+
+  -- is_inverted - draw it at the top or bottom?
+
+  local spr_blocks = 5
+  local spr_size = spr_blocks * 8
+
+  -- prepare the colors
+  palt(0, false)
+  palt(12, true)
+  is_visible = true
+  
+  if is_inverted then
+    spr_x = 128 - spr_size
+    spr_y = 0
+    status_x = spr_x
+  else
+    spr_x = 0
+    spr_y = narrator_box_y - spr_size
+    status_x = spr_size
+  end
+
+  anim_spr_x = spr_x
+  anim_spr_y = spr_y
+
+  -- apply unit animation
+  if unit.animation then
+    unit.animation:update(spr_x, spr_y)
+    is_visible = unit.animation.is_visible
+    pal(0, unit.animation.color)
+    anim_spr_x = spr_x + unit.animation.x
+    anim_spr_y = spr_y + unit.animation.y
+    if unit.animation:has_ended() then unit.animation = nil end
+  end
+
+  -- draw the unit and reset the palettes
+  local spr_id = 1
+  if unit.name == "werewolf" then spr_id = 132 end
+  if is_visible then spr(spr_id, anim_spr_x, anim_spr_y, spr_blocks, spr_blocks) end -- draw player sprite
+  pal() -- reset palette
+
+  -- draw the vfx on top of the unit
+  if unit.vfx_animation then
+    unit.vfx_animation:update(spr_x, spr_y)
+    if unit.vfx_animation:has_ended() then unit.vfx_animation = nil end
+  end
+  pal()
+
+  -- draw hp mana and name
+  draw_status_box(unit, status_x, is_inverted)
+end
+
+function draw_units()
+  draw_unit(state.player, false)
+  draw_unit(state.enemy, true)
+end
+
+-->8
+-- event system
+
+-- an event node (a game action)
+-- e.g. damage, text, healing, etc.
+function new_event(type, desc, executable)
+
+  local event = {
+    type = type,
+    desc = desc,
+    next = nil, -- the next node.
+    executable = executable -- does this event execute code?
+  }
+
+  -- in a linked list, get the tail node attached to this.
+  event.get_tail = function(this)
+    if this.next then
+      return this.next:get_tail()
+    else
+      return this
+    end
+  end
+
+  -- add new event to the end of the chain
+  event.chain_add = function(this, event)
+    this:get_tail().next = event
+  end
+
+  return event
+end
+
+-- a linked-list of events to control game flow.
+function new_sequence()
+
+  local first_event = new_info_event("it's your turn to move!")
+  local sequence = {
+    head = first_event,
+    tail = first_event
+  }
+
+  -- move sequence cursor to the next event.
+  sequence.next = function(this)
+    this.head = this.head.next
+  end
+
+  -- add an event to the end of the sequence.
+  sequence.add = function(this, e)
+    this.tail.next = e
+    this.tail = e
+  end
+
+  -- move sequence cursor to the next event.
+  sequence.insert = function(this, e)
+    e:get_tail().next = this.head.next
+    this.head.next = e
+  end
+
+  return sequence
+end
+
+-->8
+-- event generators
+-- here we create specific event types.
+
+-- basic event that displays some text.
+function new_info_event(text, executable)
+  return new_event("info", text, executable)
+end
+
+-- a unit takes damage.
+function new_damage_event(unit, value)
+
+  local desc = unit.name.." takes "..value.." damage!"
+  local dmg_event = new_event("damage", desc, true)
+  dmg_event.action = function(this)
+    unit.hp -= value
+    unit:animate(new_hit_animation())
+    sfx(3)
+    if unit.hp <= 0 then
+      unit.hp = 0
+      sequence:insert(new_end_combat_event(unit.name))
+      sequence:insert(new_info_event("the fight has ended!"))
+    end
+  end
+
+  return dmg_event
+end
+
+-- a unit's turn ends.
+function new_end_turn_event()
+  local event = new_event("auto", "", true)
+  event.action = function(this)
+    state:switch_turn()
+  end
+  return event
+end
+
+-- a unit was defeated, so the game ends.
+function new_end_combat_event(unit_name)
+  local event = new_event("end_combat", "", true)
+  event.action = function(this)
+    -- who was defeated?
+    if unit_name == "werewolf" then
+      global_scene = new_victory_scene():init()
+    else
+      global_scene = new_gameover_scene():init()
+    end
+  end
+  return event
+end
+
+function new_heal_event(name, unit, value)
+  local event = new_info_event(unit.name.." uses "..name..".", true)
+  event.action = function(this)
+    sfx(13)
+    unit.vfx_animation = new_heal_vfx_animation("green")
+
+    -- heal status effects
+    if unit.bleed > 0 then
+      sequence:insert(new_info_event(unit.name.."'s bleeding is healed!"))
+      unit.bleed = 0
+    end
+
+    local hp_gap = unit.max_hp - unit.hp
+    if hp_gap == 0 then
+      sequence:insert(new_info_event(unit.name.." is full health already!"))
+    else
+      heal_value = min(hp_gap, value)
+      sequence:insert(new_hp_recovery_event(unit, heal_value))
+    end
+  end
+  return event
+end
+
+function new_hp_recovery_event(unit, heal_value)
+  local event = new_info_event(unit.name.." recovers "..heal_value.." hp.", true)
+  event.action = function(this)
+    unit:animate(new_heal_animation())
+    unit.hp += heal_value
+    sfx(12)
+  end
+  return event
+end
+
+function new_mana_event(name, unit, value)
+  local event = new_info_event(unit.name.." uses "..name..".", true)
+  event.action = function(this)
+    
+    unit.vfx_animation = new_heal_vfx_animation()
+    sfx(13)
+
+    local mp_gap = unit.max_mana - unit.mana
+    if mp_gap == 0 then
+      sequence:insert(new_info_event(unit.name.." is full mana already!"))
+    else
+      mana_value = min(mp_gap, value)
+      sequence:insert(new_mana_recovery_event(unit, mana_value))
+    end
+  end
+  return event
+end
+
+function new_mana_recovery_event(unit, mana_value)
+  local event = new_info_event(unit.name.." recovers "..mana_value.." mana.", true)
+  event.action = function(this)
+    unit:animate(new_mana_animation())
+    unit.mana += mana_value
+    sfx(12)
+  end
+  return event
+end
+
+function new_attack_event(name, unit, target, value)
+  local event = new_info_event(unit.name.." uses "..name..".", true)
+
+  event.action = function(this)
+
+    -- insert special event effects
+    if name == "raging strike" then insert_vulnerable_event(unit) end
+    if name == "spark" then insert_blind_event(target) end
+
+    -- create an event 'head' to append to. we won't use it
+    local head_event = new_event()
+    local damage = value
+
+    -- resolve blind.
+    if unit.blind > 0 then
+      local miss_event = new_info_event(unit.name.." is blind... the attack misses!", true)
+      miss_event.action = function() sfx(14) end
+      head_event:chain_add(miss_event)
+      sequence:insert(head_event.next)
+      return
+    end
+
+    -- resolve cleave
+    if name == "cleave" then 
+      head_event:chain_add(new_info_event("a third of "..target.name.."'s life is dealt as damage."))
+      damage = ceil(target.hp * 0.33)
+    end
+
+    -- resolve crossbow
+    if name == "crossbow" then 
+      head_event:chain_add(new_info_event("a quarter of "..target.name.."'s life is dealt as damage."))
+      damage = ceil(target.hp * 0.25)
+    end
+
+    -- resolve vulnerability.
+    if target.vulnerable then
+      damage *= 2
+      head_event:chain_add(new_info_event(target.name.." is vulnerable. the damage is doubled."))
+    end
+
+    -- resolve the block.
+    if target.block > 0 then
+    
+      -- fireball cannot be blocked, deals extra damage!
+      if name == "fireball" then
+        head_event:chain_add(new_info_event("fireball cannot be blocked! it deals extra damage."))
+        damage += 25
+      else
+        blocked_damage = min(target.block, damage)
+        target.block -= blocked_damage
+        damage -= blocked_damage
+        local block_event = new_info_event("blocked "..blocked_damage.." damage.", true)
+        block_event.action = function(this) target.vfx_animation = get_vfx_for_action("block") sfx(5) end
+        head_event:chain_add(block_event)
+      end
+    end
+
+    -- resolve wolf immunity
+    if target.name == "werewolf" and damage > target.hp and name ~= "silver knife" then
+      damage = min(target.hp - 1, damage)
+      if damage == 0 then
+        local immune_event = new_info_event(target.name.." cannot be killed by "..name.."!", true)
+        immune_event.action = function(this) target.vfx_animation = new_shield_animation() end
+        head_event:chain_add(immune_event)
+      end
+    end
+
+    -- resolve the damage.
+    if damage > 0 then
+      -- play attack vfx only if attack hits
+      target.vfx_animation = get_vfx_for_action(name)
+      if name == "ravage" then insert_bleed_event(target) end
+      head_event:chain_add(new_damage_event(target, damage))
+    else
+      head_event:chain_add(new_info_event("this dealt no damage!"))
+    end
+
+    -- resolve the bleed.
+    if target.bleed > 0 and damage > 0 then
+      head_event:chain_add(new_info_event(target.name.." takes extra damage from bleeding."))
+      head_event:chain_add(new_damage_event(target, k_bleed_damage))
+      target.bleed += 1 -- unit continues to bleed another turn.
+    end
+
+    -- finally insert the event head
+    sequence:insert(head_event.next)
+  end
+
+  return event
+end
+
+function new_defend_event(name, unit, value)
+  local event = new_info_event(unit.name.." uses "..name..".", true)
+  event.action = function(this)
+    local block_event = new_block_event(unit, value)
+    block_event.action = function(this) unit.block += value end
+    unit.vfx_animation = get_vfx_for_action("defend")
+    sequence:insert(block_event)
+    sfx(4)
+  end
+  return event
+end
+
+function new_block_event(unit, value)
+  local desc = unit.name.." gains "..value.." block."
+  local event = new_info_event(desc, true)
+  event.action = function(this) unit.block += value end
+  return event
+end
+
+-- this event creates another attack event in
+-- the unit's event queue.
+function new_dark_charge_event(unit)
+  local event = new_info_event(unit.name.." howls and leaps high into the night. beware!", true)
+  event.action = function() sfx(8) end
+  unit:insert_event("dark flight")
+  return event
+end
+
+-- insert status events into the queue
+-- todo: this is not really consistent with
+-- how the other events have been created.
+
+function insert_vulnerable_event(unit)
+  local event = new_info_event(unit.name.." becomes vulnerable to attacks.", true)
+  event.action = function(this) unit.vulnerable = true end
+  sequence:insert(event)
+end
+
+function insert_blind_event(unit)
+  local event = new_info_event(unit.name.." is blinded!", true)
+  event.action = function(this) unit.blind = 2 end
+  sequence:insert(event)
+end
+
+function insert_bleed_event(unit)
+  local event = new_info_event(unit.name.." is bleeding, and will take extra damage when attacked.", true)
+  event.action = function(this) unit.bleed = 3 end
+  sequence:insert(event)
+end
+
+-->8
+-- event utilities
+-- functions to help with event system
+
+-- wrap an event as a spell, so it costs mana to use.
+function as_spell(unit, event)
+  local spell_event = new_event("auto", "", true)
+  spell_event.action = function(this)
+    if unit.mana > 0 then
+      unit.mana -= 1
+      sequence:insert(event)
+    else
+      sequence:insert(new_event("menu"))
+      sequence:insert(new_info_event("you don't have enough mana to cast this spell."))
+    end
+  end
+  return spell_event
+end
+
+-- wrap an event as an item use, so it consumes the item.
+function as_item(item_name, unit, event)
+  local item_event = new_event("auto", "", true)
+  item_event.action = function(this)
+    del(unit.items, item_name)
+    sequence:add(event)
+  end
+  return item_event
+end
+
+-- generate an event from an id for a unit/target combo.
+function generate_event(event_id, unit, target)
+
+  -- player moves
+  if event_id == "menu" then return new_event("menu") end
+  if event_id == "attack" then return new_attack_event(event_id, unit, target, 15) end
+  if event_id == "defend" then return new_defend_event(event_id, unit, 15) end
+  if event_id == "magic" then return new_event("magic") end
+
+  -- items are a special case. we need to create a new menu.
+  if event_id == "items" then
+    if #unit.items == 0 then
+      local no_item_event = new_info_event("you have no items left to use.")
+      no_item_event:chain_add(new_event("menu"))
+      return no_item_event
+    else
+      items_menu = new_menu(unit.items, 1, "menu", true)
+      return new_event("items")
+    end
+  end
+
+  -- player magic
+  if event_id == "spark" then return as_spell(unit, new_attack_event(event_id, unit, target, 12)) end
+  if event_id == "fireball" then return as_spell(unit, new_attack_event(event_id, unit, target, 20)) end
+  if event_id == "heal" then return as_spell(unit, new_heal_event(event_id, unit, 35)) end
+
+  -- player items
+  if event_id == "elixir" then return as_item(event_id, unit, new_mana_event(event_id, unit, 5)) end
+  if event_id == "crossbow" then return as_item(event_id, unit, new_attack_event(event_id, unit, target, 0)) end
+  if event_id == "silver knife" then return as_item(event_id, unit, new_attack_event(event_id, unit, target, 5)) end
+
+  -- boss moves
+  if event_id == "slash" then return new_attack_event(event_id, unit, target, 12) end
+  if event_id == "strong defend" then return new_defend_event(event_id, unit, 20) end
+  if event_id == "dark charge" then return new_dark_charge_event(unit) end
+  if event_id == "dark flight" then return new_attack_event(event_id, unit, target, 64) end
+  if event_id == "raging strike" then return new_attack_event(event_id, unit, target, 18) end
+  if event_id == "ravage" then return new_attack_event(event_id, unit, target, 8) end
+  if event_id == "cleave" then return new_attack_event(event_id, unit, target, 0) end
+
+  -- unknown event id
+  return new_info_event("you use "..event_id.."... but nothing happens.")
+end
+
+-- get the event description for magic/items
+function get_event_desc(event_id)
+  local descriptions = {
+    spark = "causes enemy to miss",
+    fireball = "ignores blocking defense",
+    heal = "heals hp and stops bleeding",
+    elixir = "recovers 5 mana",
+    crossbow = "damages 25% hp",
+  }
+
+  descriptions["silver knife"] = "deal 5 fatal damage"
+
+  if descriptions[event_id] ~= nil then
+    return descriptions[event_id]
+  else
+    return "unknown description"
+  end
+end
+
+-->8
+-- scenes
+-- scenes control which phase the game is running.
+
+-- main gameplay scene
+function new_combat_scene()
+
+  local scene = {}
+
+  scene.init = function(this)
+    sequence = new_sequence()
+    state = new_game_state()
+    combat_menu = new_menu({"attack", "defend", "magic", "items"}, 2)
+    magic_menu = new_menu({"fireball", "spark", "heal"}, 1, "menu", true)
+    state:start_turn(true)
+    return this
+  end
+
+  -- draw the combat scene.
+  scene.draw = function(this)
+    cls(0)
+
+    -- if we don't have an 'event' we can't draw anything.
+    if not event then return end
+
+    -- draw background
+    map(0, 0, 0, 0)
+
+    draw_narrator_box()
+    draw_units()
+
+    -- show the current event.
+    if event.type == "menu" then
+      combat_menu:draw()
+    elseif event.type == "magic" then
+      magic_menu:draw()
+      draw_caret("back ")
+    elseif event.type == "items" then
+      items_menu:draw()
+      draw_caret("back ")
+    else
+      print_wrapped(event.desc, narrator_padding, narrator_box_y + narrator_padding, 7)
+      draw_caret()
+    end
+  end
+
+  -- update the sequence event and show
+  -- appropriate information.
+  scene.update = function(this)
+
+    event = sequence.head
+    -- execute this event's action.
+    if event.executable then
+      event:action()
+      event.executable = false
+    end
+
+    -- update the menu if we are showing one.
+    if event.type == "menu" then combat_menu:update() end
+    if event.type == "magic" then magic_menu:update() end
+    if event.type == "items" then items_menu:update() end
+
+    -- each time we press x, the sequence progresses.
+    if btnp(5) or event.type == "auto" then sequence:next() end
+    if btnp(5) and (event.type == "info" or event.type == "damage") then sfx(1) end
+  end
+
+  return scene
+end
+
+function new_victory_scene()
+  local scene = {}
+
+  scene.init = function(this)
+    music(-1)
+    return this
+  end
+
+  scene.draw = function(this)
+    cls(0)
+    print_x_centered("victory", 60, 11)
+    print_x_centered("you have defeated the wolf!", 68, 7)
+    rect(2, 2, 126, 126, 7)
+  end
+
+  scene.update = function(this)
+    -- reset to the combat scene.
+    if btnp(5) then sfx(1) global_scene = new_splash_scene():init() end
+  end
+
+  return scene
+end
+
+function new_gameover_scene()
+  local scene = {}
+
+  scene.init = function(this)
+    music(-1)
+    return this
+  end
+
+  scene.draw = function(this)
+    cls(0)
+    print_x_centered("gameover", 60, 8)
+    print_x_centered("you have lost!", 68, 7)
+    rect(2, 2, 126, 126, 7)
+  end
+
+  scene.update = function(this)
+    -- reset to the combat scene.
+    if btnp(5) then sfx(1) global_scene = new_splash_scene():init() end
+  end
+
+  return scene
+end
+
+function new_splash_scene()
+  local scene = {}
+
+  scene.init = function(this)
+    music(0)
+    return this
+  end
+
+  scene.draw = function(this)
+    cls(0)
+    rect(2, 2, 126, 126, 7)
+    print_x_centered("-- an rpg adventure --", 78, 8)
+    this:draw_logo()
+
+    if (toggle_per_n_frames(15)) then
+      print_x_centered("press  to start", 112, 7)
+    end
+  end
+
+  scene.draw_logo = function(this)
+
+    -- draw an animated logo
+    local logo_y = 64
+    local spr_start = 97
+    local letter_width = 9
+    local offset_power = 3
+    local total_width = 10 * letter_width
+    local logo_x = (128 - total_width) / 2
+
+    -- draw and animate each letter
+    for i=0, 9 do
+      offset_factor = sin(f_count/64 + i/16)
+      spr(spr_start + i, logo_x + i * letter_width, logo_y + offset_factor * offset_power)
+    end
+
+    -- wolf moon logo
+    spr(137, 48, 20, 4, 4)
+  end
+
+  scene.update = function(this)
+    -- reset to the combat scene.
+    if btnp(5) then sfx(20) global_scene = new_combat_scene():init() end
+  end
+
+  return scene
+end
+
+-->8
+-- animation
+
+-- an animation object.
+-- it just contains meta-data on how to
+-- modify a unit.
+
+function new_animation(loop_length)
+  local animation = {
+    name = "default",
+    n = 0,
+    loop_length = loop_length,
+    frames_left = 15,
+    is_visible = true,
+    x = 0,
+    y = 0,
+    color = 0,
+  }
+  
+  -- update its life-time and rendering meta-data.
+  animation.update = function(this, unit_x, unit_y)
+    this.n += 1
+    this.frames_left -= 1
+    this:render(unit_x, unit_y)
+  end
+
+  animation.has_ended = function(this)
+    return this.frames_left <= 0
+  end
+
+  -- use this for repeating animations (returns true/false)
+  animation.loop_frame = function(this, n)
+    return this.n % this.loop_length == n
+  end
+
+  animation.render = function(this, unit_x, unit_y)
+  end
+
+  return animation
+end
+
+function new_hit_animation()
+  local animation = new_animation(5)
+  animation.render = function(this)
+    this.color = 0
+    if this:loop_frame(0) then this.color = 7 end
+    if this:loop_frame(1) then this.color = 14 end
+    if this:loop_frame(2) then this.color = 8 end
+
+    this.x = sin(this.n/3.15) * 2
+  end
+  return animation
+end
+
+function new_heal_animation()
+  local animation = new_animation(5)
+  animation.render = function(this)
+    this.color = 0
+    if this:loop_frame(0) then this.color = 7 end
+    if this:loop_frame(1) then this.color = 11 end
+    if this:loop_frame(2) then this.color = 3 end
+  end
+  return animation
+end
+
+function new_mana_animation()
+  local animation = new_animation(5)
+  animation.render = function(this)
+    this.color = 0
+    if this:loop_frame(0) then this.color = 7 end
+    if this:loop_frame(1) then this.color = 12 end
+    if this:loop_frame(2) then this.color = 1 end
+  end
+  return animation
+end
+
+-->8
+-- visual effects
+-- vfx play on-top of a unit and animation.
+-- use it for particles, effects, etc.
+
+-- look-up vfx to use for an event.
+function get_vfx_for_action(name)
+  if name == "slash" then sfx(7) return new_slash_animation() end
+  if name == "dark flight" then sfx(6) return new_blue_slash_animation() end
+  if name == "ravage" then sfx(6) return new_slash_animation() end
+  if name == "spark" then sfx(9) return new_spark_animation() end
+  if name == "fireball" then sfx(10) return new_fire_attack_animation() end
+  if name == "defend" then return new_shield_animation() end
+  if name == "strong defend" then return new_shield_animation() end
+  if name == "block" then return new_shield_animation() end
+  if name == "silver knife" then sfx(11) return new_blue_slash_animation() end
+
+  -- generic animation but special SFX
+  if name == "cleave" then sfx(15) new_generic_attack_animation() end
+  if name == "crossbow" then sfx(16) new_generic_attack_animation() end
+
+  sfx(6)
+  return new_generic_attack_animation()
+end
+
+function new_shield_animation()
+  local animation = new_animation(2)
+  animation.render = function(this, unit_x, unit_y)
+
+    -- flash the color
+    if this:loop_frame(0) then 
+      pal(7, 12) 
+      pal(12, 7)
+    end
+
+    -- position the sprite.
+    local unit_offset = 4
+    local start_x = unit_x + unit_offset
+    local start_y = unit_y + unit_offset
+    spr(128, start_x, start_y, 4, 4)
+
+  end
+  return animation
+end
+
+function new_slash_animation()
+  local animation = new_animation(3)
+  animation.render = function(this, unit_x, unit_y)
+
+    -- flash the color.
+    if this:loop_frame(0) then pal(9, 14) end
+
+    -- position the sprite.
+    if not this:loop_frame(2) then
+      local unit_offset = 4
+      local start_x = unit_x + unit_offset
+      local start_y = unit_y + unit_offset
+      spr(6, start_x, start_y, 4, 4)
+    end
+
+  end
+  return animation
+end
+
+function new_blue_slash_animation()
+  local animation = new_animation(3)
+  animation.render = function(this, unit_x, unit_y)
+
+    -- change color to blue.
+    pal(10, 7)
+    pal(9, 12)
+    pal(8, 1)
+
+    -- flash the color.
+    if this:loop_frame(0) then pal(9, 7) end
+
+    -- position the sprite.
+    if not this:loop_frame(2) then
+      local unit_offset = 4
+      local start_x = unit_x + unit_offset
+      local start_y = unit_y + unit_offset
+      spr(6, start_x, start_y, 4, 4)
+    end
+
+  end
+  return animation
+end
+
+function new_fire_attack_animation()
+  local animation = new_animation(4)
+  animation.frames_left = 16
+  animation.render = function(this, unit_x, unit_y)
+
+    -- flash the color.
+    if this:loop_frame(1) then pal(7, 10) end
+    if this:loop_frame(2) then pal(9, 7) end
+
+    -- position the sprite.
+    if not this:loop_frame(3) then
+      local unit_offset = 4
+      local start_x = unit_x + unit_offset
+      local start_y = unit_y + unit_offset
+      spr(75, start_x, start_y, 4, 4)
+    end
+
+  end
+  return animation
+end
+
+function new_spark_animation()
+  local animation = new_animation(3)
+  animation.frames_left = 9
+  animation.render = function(this, unit_x, unit_y)
+
+    -- flash the animation.
+    if this:loop_frame(1) then pal(9, 7) end
+
+    -- position the sprite.
+    if not this:loop_frame(2) then
+      local unit_offset = 4
+      local start_x = unit_x + unit_offset
+      local start_y = unit_y + unit_offset
+      spr(10, start_x, start_y, 4, 4)
+    end
+
+  end
+  return animation
+end
+
+function new_generic_attack_animation()
+  local animation = new_animation(3)
+  animation.frames_left = 6
+  animation.render = function(this, unit_x, unit_y)
+
+    -- flash the color.
+    if this:loop_frame(1) then pal(7, 10) end
+
+    -- position the sprite.
+    if not this:loop_frame(2) then
+      local unit_offset = 4
+      local start_x = unit_x + unit_offset
+      local start_y = unit_y + unit_offset
+      spr(75, start_x, start_y, 4, 4)
+    end
+
+  end
+  return animation
+end
+
+function new_particle(x, y)
+  local particle = {
+    x=x,
+    y=y,
+    f=0,
+  }
+  return particle
+end
+
+function new_heal_vfx_animation(color_override)
+
+  local animation = new_animation(3)
+  animation.frames_left = 30
+  animation.particles = {}
+  animation.color_override = color_override
+
+  -- this animation renders a circular
+  -- particle pattern, which fades with time.
+
+  animation.render = function(this, unit_x, unit_y)
+
+    local loop_frame_n = this.n % this.loop_length
+    local dead_list = {}
+    local particle_life = 4
+
+    local anchor_x = unit_x + 16
+    local anchor_y = unit_y + 16
+
+    if this.frames_left > particle_life * 2 then
+      -- add a new particle
+      local t_factor = this.n/1.8
+      local circle_factor = sin(t_factor)
+      local radius_factor = 5 + this.n / 2
+      local spawn_x = sin(t_factor) * radius_factor
+      local spawn_y = cos(t_factor) * radius_factor
+      add(this.particles, new_particle(spawn_x, spawn_y))
+    end
+
+    if this.color_override == "green" then
+      pal(1, 3)
+      pal(12, 11)
+    end
+
+    for p in all(this.particles) do
+      px = anchor_x + p.x
+      py = anchor_y + p.y
+      spr_i = 70 + p.f % particle_life
+      spr(spr_i, px, py)
+
+      p.f += 1
+      if p.f == particle_life * 2 then
+        add(dead_list, p)
+      end
+    end
+
+    for p in all(dead_list) do
+        del(this.particles, p)
+    end
+
+  end
+  return animation
+end
+
+-->8
+-- overrides
+
+function _init()
+  global_scene = new_splash_scene():init()
+end
+
+function _update()
+  f_count += 1
+  global_scene:update()
+end
+
+function _draw()
+  global_scene:draw()
+end

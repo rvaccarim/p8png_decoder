@@ -1,0 +1,1213 @@
+--jack of spades
+--by bonevolt
+srand()
+--constants
+cartdata("bonevolt_jack_of_spades")
+last_tile=peek(0x5eb5)
+if stat(100)=="challenge mode" and #stat(6)>0 then
+ poke(0x5ee2,stat(6))
+ poke(0x5ee3,peek(0x5ee3)+1)
+end
+poke(0x5ee4,0)
+poke(0x5ee1,max(peek(0x5ee1),peek(0x5ee2)))
+
+function peekbit(i)
+ return band(1,shr(peek(0x5e00+i/8),i%8))
+end
+
+function pokebit(i,v)
+ local byte,bit=peek(0x5e00+i/8),2^(i%8)
+ byte=band(byte,0xff-bit)
+ poke(0x5e00+i/8,bor(byte,bit*v))
+end
+
+function peeknil(i)
+ return peek(i)>0 and peek(i) or nil
+end
+
+function irnd(n)
+ return flr(rnd(n))
+end
+
+function irnd1(n)
+ return irnd(n)+1
+end
+
+function shuffle_table(t)
+ for i=#t,1,-1 do
+  local j=irnd1(i)
+  t[i],t[j]=t[j],t[i]
+ end
+ return t
+end
+
+function str_to_table(str)
+ local tab,sptab={},{}
+ for i=1,#str do
+  if sub(str,i,i)=="," then
+   for j=i+1,#str do
+    local strn=sub(str,j,j)
+    if(strn=="|")add(sptab,tab)tab={}i+=1 break
+    if strn=="," then
+     local s=sub(str,i+1,j-1)
+     if tonum(s) then
+      s=tonum(s)
+     elseif s=="" then
+      s=0
+     elseif s=="t" then
+      s=true
+     elseif s=="f" then
+      s=false
+     elseif s=="{" then
+      s={}
+     end
+     add(tab,s)
+     i=j
+     break
+    end
+   end
+  end
+ end
+ if (#sptab>0) return sptab
+ return tab
+end
+
+function unpack(list,from,to)
+ from,to=from or 1,to or #list
+ if from<=to then
+  return list[from],unpack(list,from+1,to)
+ end
+end
+
+function to_tab_unp(tab)
+ return unpack(str_to_table(tab))
+end
+
+function checkered_floor(c,ww,hh,mn1,mn2,mx1,mx2,ox1,oy1,ox2,oy2,cc)
+	for i=mn1-1,mx1 do
+	 for j=mn2-1,mx2 do
+	  if (i+j)%2==0 then
+	 		rectfill(ww*i+ox1+c,hh*j+oy1,ww+ww*i+ox2+c,hh+hh*j+oy2,cc)
+	 	end
+	 end
+	end
+end
+
+function cam(xx,yy)
+ camera(cam_x+(xx or 0),cam_y+(yy or 0))
+end
+
+--          1   2    3        4     5    6               
+draw_funct={cls,rect,rectfill,fillp,sspr,checkered_floor}
+
+message,hplay,hcanc,wait,n=nil,to_tab_unp(",0,0,0,1,")
+
+fade_c=str_to_table(",,1,1,1,1,13,6,2,4,9,3,13,5,8,14,1,13,8,11,9,13,7,7,14,10,15,10,6,12,15,7,")
+
+fade_in=0
+
+en_group=str_to_table(",15,|,15,15,15,|,16,15,16,|,16,16,16,|,17,17,16,|,15,17,17,15,|,17,17,17,17,|,15,18,18,15,|,16,16,16,16,|,15,19,16,17,18,|,19,19,19,19,|,15,19,16,19,18,|,8,19,19,17,8,|,8,18,9,17,8,|,8,9,9,8,|,8,8,9,7,9,8,8,|")
+
+--gfx
+csprb={nil,nil,nil,nil,to_tab_unp(",0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,")}
+chtr=str_to_table(",11,11,11,11,11,11,11,11,11,0,0,0,0,0,0,0,0,11,0,")
+char_vptc=str_to_table(",6,14,6,13,14,6,14,6,14,14,6,6,7,1,14,6,6,14,6,")
+
+mousep,hcol,kcol,kposx,kposy,kflip=0,str_to_table(",1,9,10,13,"),str_to_table(",1,8,9,3,"),{},{},{}
+poke(0x5f2d,1)
+kposx,kposy,kflip=str_to_table(",7,7,7,7,7,7,7,11,11,11,11,11,11,11,15,15,15,15,15,15,15,11,11,"),str_to_table(",6,9,12,15,18,21,24,6,9,12,15,18,21,24,6,9,12,15,18,21,24,10,20,"),str_to_table(",false,false,false,false,true,true,true,false,false,false,false,true,true,true,false,false,false,false,true,true,true,false,true,")
+
+c_hue=str_to_table(",1,2,4,3,5,5,5,2,3,3,4,1,5,2,2,")
+c_hue[0]=5
+c_val=str_to_table(",1,1,1,1,1,3,5,2,2,3,3,3,2,3,4,")
+c_val[0]=0
+
+--b,r,y,g,gray,fire,elec,earth,wind,ice
+to_col=str_to_table(",1,1,2,1,1,2,4,1,13,13,1,1,2,4,3,5,8,7,2,6,13,2,13,8,9,11,13,9,9,5,13,12,13,12,14,9,11,6,10,6,4,6,6,14,6,15,15,6,6,15,10,9,7,7,6,7,7,7,7,7,7,7,13,7,7,7,")
+
+--sx,sy,w,h,offx,offy
+sprv=str_to_table(",41,0,35,11,|,60,11,11,6,|,76,0,52,11,|,71,11,5,5,|,0,0,14,16,|,14,0,15,16,|,0,16,25,15,|,25,16,12,14,|,76,11,16,18,|,92,11,18,16,|,0,47,17,16,|,0,32,12,15,|,12,32,17,14,|,29,32,14,14,|,17,46,15,18,|,32,46,15,18,|,56,30,24,24,|,80,30,24,24,|,104,30,24,24,|,56,54,24,24,|,80,54,24,24,|,104,54,24,24,|,80,78,24,24,|,104,78,24,24,|,56,96,24,24,|,37,11,20,20,|")
+
+--position of each kind on the card
+kpos=str_to_table(",11,|,9,13,|,8,11,14,|,1,7,15,21,|,1,7,15,21,11,|,1,7,15,21,4,18,|,1,7,15,21,4,18,22,|,1,7,15,21,4,18,22,23,|,1,3,5,7,15,17,19,21,11,|,1,3,5,7,15,17,19,21,22,23,|")
+party_add=str_to_table(",0,0,0,3,2,4,5,0,0,0,6,")
+map_tile=
+{
+ str_to_table(",3,,,8,4,1,,13,,1,|,13,1,1,,,8,,8,1,1,|,13,2,,1,1,1,,,,1,|,1,,,8,,5,8,1,8,,|,1,1,1,1,13,1,,,1,,|,11,,8,,,,1,,1,,|,8,,1,,1,8,1,8,1,6,|,,1,1,,8,9,1,,,,|,,8,,1,1,1,,8,1,1,|,1,,8,,12,8,,,,7,|"),
+ str_to_table(",5,1,,1,,1,1,,1,2,|,,1,8,,8,1,,8,,1,|,1,,,1,,,8,1,4,1,|,3,8,1,,1,1,,,1,1,|,1,1,,,1,1,,8,,,|,,1,,6,,1,,1,1,,|,8,,,8,1,,1,,,8,|,,1,1,,,8,,8,1,,|,4,1,8,1,1,,,1,,8,|,1,1,,-2,1,1,,1,4,1,|"),
+ str_to_table(",03,17,00,17,00,17,17,00,17,18,|,00,17,08,00,03,17,00,00,00,17,|,17,00,00,17,00,00,00,17,00,17,|,02,08,17,00,17,17,00,00,17,17,|,17,17,00,00,17,17,00,00,00,00,|,00,17,00,19,00,17,00,17,17,00,|,00,00,00,17,17,00,17,00,00,00,|,00,17,00,00,00,00,00,00,17,00,|,00,-2,14,14,14,14,14,30,00,00,|,17,-1,00,08,00,12,17,-1,00,17,|")
+}
+
+cart=
+{
+	"#josw1",
+	"#josw2",
+	"#josw3"
+}
+
+messgs=
+{
+	",i don't know where these\n\"monsters came from\nbut they're not friendly,i came to the forest\nto chop some wood\nand when i came back\neveryone was gone...\nthere's just monsters!,the joker must have\nsomething to do with\nthese monsters\n\nlet's find him!,these monsters must have\nbeen brought to this\nworld through the same\nportal we chessfolk have!,i opened a portal to\nother worlds? of course\ni did! hahaha! let's\nhave an interdimensional\nparty!,the white king came to\nseize this land. we must\nstop him!,ok.\nthings got out of hand\ni admit it...\nhahaha!!,the queen of hearts joined\nyour party!\n\nshe can use hearts cards!,the king of diamonds joined\nyour party!\n\nhe can use diamonds cards!,the jack of clubs joined your\nparty!\n\nhe can use clubs cards!,you found the super glove!\n\nyou can now hold 7 cards at\nonce!,the black king joined your\nparty!\n\nhe can't use cards but he's\nvery strong in combat!,the joker joined your party!\n\nhe can use any card!,dark forest\n\nonly monsters allowed!\ngo away!,",
+	",,what? my house looks\nlike a mushroom?\n\nhow insulting!,the white queen has\ntaken over the castle of\ndiamonds while the king\nwas away!\nyou need to stop her!,got item!,bark bark\n*you're strong*\n\nbark bark bark!\n*but lance is stronger!*,the one who wields the\nlegendary weapon!\nwearing his hypnotizing\ncrimson red scarlet\nscarf!,the one who does not\ndemand attention\nbut attention demands\nhim!,you guessed it... i'm\nlance! the protagonist\nof this game,ghwhaht!?\nyou never heard of me?\nthis is beyond\nimpossible!,...not my game? now\nthat you mention it...\nthe camera stopped\nfollowing me a while\nago...,well.. could you help me\nfind my friend chester?\nhe disappered just after\nwe came to this land,take this torch! it\nwill help you dispel\nthe darkness!,",
+	",jack of spades,queen of hearts,king of diamonds - 1 armor,jack of clubs - crit x3,black king,joker,white king - fear,white pawn - pierce,white bishop - heal,sleeping flower,static cactus,muncher,multi flower,dummy,floaty,snaky - poison,pumpky,batty - lifesteal,skully - kill <13 hp,mouthface - stone form 3 turns,furkniceght - splash attack,cyclopt - pierce,daymon - confused,tombzord - sleep,skelly,swordslime - double attack,spellslime - sp immunity,wardrobber - detroy 1st card,jimmy - crit chance x3,rook,knight - allies att+1,white queen - splash att/heal,stumpy,chester,",
+	",silver sharp: ally att+3\n8,fireball: 8 dmg and 4 to\nneighbors,honor: ally att x2\n2,empower: allies att+2\n4,fire bomb: 7 dmg 3x3,metal blade: 12 pierce dmg,soul blade: 1 dmg/self hp\nmissing,fire storm: dmg enms\n5 dmg,u blade: pierce enms\n7 dmg,s armor: def+2 allies\n4,u sharp: ally att+8\n2,u fire: dmgs self and enms\n7 dmg,u armor: ally dmg/2\n4,|,heal: ally hp+8,sleeping seed\nhp:10 att:5,heal allies: hp +5,corrosion: enm def-3\n4,static cactus\nhp:10 att:3,barrier: 12 dmg,flood: kills enms\n 15 hp or less,rust: enms def-1\n6,heartbreak: enms spdef-3\n4,muncher\nhp:15 att:3,multi flower\nhp:5 att:5,s barrier: detroyed if\ndmg 9 or more. 4,flood bubble: 1 dmg/hp missing,|,s focus: crit chance x3\n4,thunder:\n15 dmg to enm,boulder: push enm back\n10 dmg,taunt: enms att ally\n1,fissure: dmg 1 collumn\n8 dmg,shock: dmg 3 lines\n6 dmg,stone form: att and damage\nreduced t0 1. 3,confusion: 50% enm att allies\n4,electrify: return dmg received\n4,fear: enms att-2\n4,static: 20 dmg spread between\nenms (3 rows; r"
+}
+--262 chars, messg 2 pode usar 762
+item_txt=str_to_table(",  twin sword\ndouble attack,  crystal heart\n50% chance to heal\n+2 att,  grand king's crown\natt causes fear x3,  humble pouch\npoison x2\n+1 att,  silver edge\npierce att\n+6 att,  pocket ocean\nattack causes rust x2\n+2 att,  sparkling mantle\nreturn dmg\n+2 att,  perpetual wind\natt clears buffs\n+2 att,  heat blade\n50% splash dmg\n+4 att,  living whip\nsummon stumpy,  stone mask\n4 armor,  winter star\ncrit att freezes 2 turns\n+1 att,  red raindrop\ncrit att lifesteal,  scarlet shadow\n75% crit chance,  black pearl\nallies att+1,  magic mirror\njoker mirrors allies\nsuits,  ultra glove\nhold 9 cards\n+4 att,  chaos scepter\nreshuffe hand 2 times\nper turn,")
+
+--[[scene_text=
+{
+ "    entering the dark forest",
+ "    entering the white castle",
+ "        congratulations!\n  you defeated the white queen!\n\n       new game+ unlocked!",
+}]]
+will_start,will_start_tut=0,0
+-->8
+--init
+function _init()
+	t_loop,messgok,cam_x,cam_y,ptc,vfx,handsz,curr_mp,m_bg_col,m_bg_col2,m_char_x,m_char_y=to_tab_unp(",,{,,,{,{,9,1,11,3,3,2,")
+ world=peek(0x5eb6)
+ check_chars()
+ --
+-- poke(0x5ec9,3)
+-- scene=peek(0x5ec9)
+
+ --if stat(100)==nil then
+ if peek(0x5ec9)==0 then 
+  init_title()
+ elseif peek(0x5ec9)==1 then
+  scene=1
+  --curr_tile=peek(0x5eb5)
+		poke(0x5eb3,1) --m_char_x
+		poke(0x5eb4,5) --m_char_y
+		local exptiles=0
+		for i=0,199 do--fog
+		 if (i<100 and peekbit(i)==1) exptiles+=1
+		 pokebit(i,0)
+		end
+		poke(0x5ece,exptiles)
+		poke(0x5ecb,peek(0x5e8c)-1)
+		poke(0x5eb6,2)
+		world=2
+		poke(0x5e8c,1+min(peek(0x5eca)*7,7))--en_group
+  init_cutscene()
+ elseif peek(0x5ec9)==2 then
+  scene=2
+  --curr_tile=peek(0x5eb5)
+		poke(0x5eb3,5) --m_char_x
+		poke(0x5eb4,10) --m_char_y
+		local exptiles=0
+		for i=0,199 do--fog
+		 if (i<100 and peekbit(i)==1) exptiles+=1
+		 pokebit(i,0)
+		end
+		poke(0x5ecf,exptiles)
+		poke(0x5ecc,peek(0x5e8c)-1)
+		poke(0x5eb6,3)
+		world=3
+		poke(0x5e8c,1+min(peek(0x5eca)*10,10))--en_group
+  init_cutscene()
+ elseif peek(0x5ec9)==3 then
+  scene=3
+  --curr_tile=peek(0x5eb5)
+		poke(0x5eb3,3) --m_char_x
+		poke(0x5eb4,2) --m_char_y
+		local exptiles=0
+		for i=0,199 do--fog
+		 if (i<100 and peekbit(i)==1) exptiles+=1
+		 pokebit(i,0)
+		end
+		--mark super glove as already acquired
+		if (peek(0x5e8d)==7) pokebit(100,1)
+		poke(0x5ed0,exptiles)
+		poke(0x5ecd,peek(0x5e8c)-1)
+		poke(0x5eb6,1)
+		world=1
+		poke(0x5e8c,6)--en_group
+  init_cutscene()
+ end
+ menu=0
+ if (world==0) clear_data()
+end
+
+function init_title(ending)
+ update,draw,fade,g_time,cam_pos,camx1,camx2=upd_title,drw_title,to_tab_unp(",-128,0,25,0,0,")
+ if ending then
+  if ending==0 then
+   music(19)
+  else
+   music(23)
+  end
+ else
+  music(0)
+ end
+end
+
+function init_cutscene()
+ update,draw,fade,g_time=upd_scene,drw_scene,-128,0
+ poke(0x5ec9,0)
+ music(2)
+ dialog=1
+ messg_char2=nil
+ if scene==1 then
+  jackspr=5 jackf=false
+  clubspr=14 clubf=false
+  jokerspr=16
+  if peek(0x5eca)==0 then
+	  messg=
+	  {
+	  "dark forest.\nonly monsters allowed...",
+	  "only monsters? well,\nmy castle is this way,\nso we'll have to go\neventually",
+	  "defeating the white king\ndidn't change much...\nthe monsters must have\nanother master!",
+	  "the dark forest...\nthere is a village in\nthere. i hope nobody\nis hurt",
+	  "let's go! we have to\nfind out who's behind\nthis!",
+	  "the monsters are getting\nstronger each time we\nfight them! stay alert!",
+	  "this will be fun!"
+	  }
+	  messg_char=str_to_table(",1,3,5,2,1,4,6,")
+	  new_message(1)
+  end
+ elseif scene==2 then
+  lancex=128 lancey=70 lancef=true
+  jackspr=5
+  if peek(0x5eca)==0 then
+	  messg=
+	  {
+	  "my castle looks so\ndifferent in such a\nshort time. these\nmonsters make formidable\nservants...",
+	  "wait! card dudes!\ni found chester!\nthanks for your help!\nsorry i can't help you\nnow, i'm in a hurry.",
+	  "please take this amulet.\nit will help you in\nthe final battle!",
+	  "i was expecting you,\n\"heroes\".\nthe white army is much\nstronger with the\nmonsters as allies!",
+	  "come in! my new friends\nare getting anxious for\nyour arrival!",
+	  "only one monster is\nenough to defeat this\nteam.",
+	  "the other monsters can\njust watch as i smash\nthem with my cursed\nstaff! i have waited\n999 years for this!",
+	  "and tomorrow is my\nbirthday!",
+	  "the monsters are even\nstronger now!\n\nwe must go!",
+	  "white queen, the\nstrongest chess piece...\nget ready, she's\npowerful and merciless",
+	  "am i the only one\nweirded out by her\ntalking through\ntelepathy?"
+	  }
+	  messg_char=str_to_table(",3,7,7,9,9,8,8,8,1,5,6,")
+  else
+	  messg=
+	  {
+	  "ah, heroes!\ncome in, my servants\nmiss you"
+	  }
+	  messg_char=str_to_table(",9,")
+	  messg_char2=str_to_table(",9,")
+  end
+	 new_message(1)
+	elseif scene==3 then
+	 bgc=7
+		 messg=
+		 {
+		 "is this it..?",
+		 "will i stop... being?",
+		 "you know the answer...\nwhen the game ends we\njust wait for the next\nsession.",
+		 "you are being controlled,\nheroes. and i too am\nonly a mere pawn to my\nmaster.",
+		 "but who controls the\nones controlling us?",
+		 "behind the curtains you\nwill always find just\nmore curtains...",
+		 "the shackles will only\nbe broken when the game\nof games finally ends",
+		 "next time it won't be as\neasy, heroes!",
+		 "sounds like insanity to\nme! she forgot the mad\nlaughter at the end!\nhuge missed opportunity!\nhahaha!",
+		 "alright, picture time!\ndo your best battle\npose, everyone!",
+		 "what about my face? is\nthis a good expression?",
+		 "it's the same face you\nalways make...\n'hearts is really good\nat it though!",
+		 "this is my time to shine!\nmy bow is ready!\njumpin' in 3!",
+		 "you're all are taking\nthis way too seriously...",
+		 "you are the one too\nserious! loosen up!\nhahaha"
+		 }
+		 messg_char=str_to_table(",9,9,9,9,9,9,9,9,6,2,1,3,4,5,6,")
+		 messg_char2=str_to_table(",9,9,9,9,9,9,9,9,6,2,1,1,4,5,5,")
+	 if peek(0x5eca)==1 then
+		 new_message(1)
+		else
+		 new_message(10)
+  end
+ end
+end
+
+function init_map()
+ music(-1,400)
+ poke(0x5ec9,0)
+ if world==2 then
+  item_str={}
+	 for i=peek(0x5eb2)+1,min(peek(0x5eb2)+6,18) do
+	  item_str[peek(0x5eb6+i)-6]=true
+	 end
+  for i=1,18 do
+   if (item_str[i]) messgs[2]=messgs[2]..item_txt[i]
+   messgs[2]=messgs[2]..","
+  end
+ end
+ draw_fade_out()
+ draw_fade_out()
+ draw_fade_out()
+-- load("josw3.p8","back to title","megastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\nmegastring megastring megastring\n")
+ if challenge_mode then
+  load("#josch","back to title",tostr(rnd(0xffff.ffff),true)..messgs[4])
+ elseif world<=3 and world>0 then
+  load(cart[world],"back to title",messgs[world])
+ end
+ --run()
+end
+-->8
+--init functions
+function clear_data()
+	for i=0x5e00,0x5edf do
+	 poke(i,0)
+	end
+	--world
+	poke(0x5eb6,1)
+	world=1
+	--loop
+	poke(0x5eca,0)
+ 
+	--torch
+--	pokebit(200,1)
+--	for i=0,99 do--fog
+--	 pokebit(i,1)
+--	end
+	
+	poke(0x5e80,1) --char available
+	
+	
+	poke(0x5e86,2) --ch lvl
+	poke(0x5e87,3)
+	poke(0x5e88,4)
+	poke(0x5e89,4)
+	poke(0x5e8a,5)
+	poke(0x5e8b,5)
+	
+	
+	poke(0x5e8c,1) --next_en_gr
+	poke(0x5e8d,5) --hand size
+	
+--	poke(0x5e8d,7) --hand size
+
+	poke(0x5eb3,3) --m_char_x
+	poke(0x5eb4,2) --m_char_y
+	
+	item={}
+	item[1]={7,11,15}
+	item[2]={8,12,16}
+	item[3]={9,13,17}
+	item[4]={10,14,18}
+	item[5]={19,20,21}
+	item[6]={22,23,24}
+	itemget={}
+	
+	for i=1,6 do
+	 shuffle_table(item[i])
+	 add(itemget,i)
+	 add(itemget,i)
+	 add(itemget,i)
+	end
+	shuffle_table(itemget)
+	
+	for i=0,5 do
+		for j=1,3 do
+		 --item char order
+		 poke(0x5e8d+i*3+j,item[i+1][j])
+		 --item char get order
+		 poke(0x5e9f+i*3+j,itemget[i*3+j])
+	 end
+	end
+	
+	--items aqquired
+	poke(0x5eb2,0x00)
+--	poke(0x5eb2,0x12)
+--	--item order
+	chitem={0,0,0,0,0,0}
+ for i=1,18 do
+  local ch=itemget[i]
+  chitem[ch]+=1
+  poke(0x5eb6+i,item[ch][chitem[ch]])
+ end
+ check_chars()
+-- poke(0x5ecb,20)
+--	poke(0x5ecc,20)
+--	poke(0x5ecd,20)
+--	poke(0x5ece,100)
+--	poke(0x5ecf,100)
+--	poke(0x5ed0,100)
+-- poke(0x5eca,3)
+
+end
+-->8
+--update
+function _update()
+ --if (btn()>0) clear_data() _init()
+ --mouse
+ wait,mousex,mousey=max(0,wait-1),stat(32),stat(33)
+ mousep+=1
+ if (stat(34)==0)mousep=0
+ 
+ if (stat(31)=="") poke(0x5ee4,1)
+ 
+ if (stat(6)=="tow1") init_map()
+ 
+ g_time+=1
+ t22,t4=flr(g_time/2%2),g_time%4
+ --if message==nil then
+  if messagetim then
+  if messagetim~=4 then
+   messagetim+=1
+   messagesz+=10
+   if (messagetim>4) messagesz-=20
+   if messagetim>10 then
+    messagetim=nil
+    if messagenum<#messg_char then
+     new_message(messagenum+1)
+    end
+   end
+  else
+   if mousep==1 then
+    if messagenum<#messg_char and messg_char[messagenum]==messg_char[messagenum+1] then
+     messagetxt=messg[messagenum+1]
+     messagenum+=1
+    else
+     messagetim+=1
+    end
+   end
+  end
+ else
+	 if (g_time==2640) g_time,t_loop=0,1
+	 	update()
+ end
+
+ if fade_in>0 then
+  fade_in+=1
+  if (fade_in>13) fade_in=0
+ end
+ 
+-- --achievements
+-- --1: all max
+-- local maxed=0
+-- for i=0x5e86,0x5e8b do
+--  maxed+=peek(i)
+-- end
+-- if (maxed==78) poke(0x5ee0,1)
+-- --2: finish
+-- if (peek(0x5eca)>0) poke(0x5ee1,1)
+-- --3: 100%
+--	--poke(0x5ee2,1)
+--	--4: no glove
+--	if (peek(0x5eca)>0 and peek(0x5e8d)==5) poke(0x5ee3,1)
+-- --5: finish with 4
+--	if (peek(0x5eca)>0 and peek(0x5e84)==0) poke(0x5ee4,1)
+-- --6: 2 vs queen
+--	if (peek(0x5eb6)==3 and peek(0x5e8c)==21 and peek(0x5e82)==0) poke(0x5ee5,1)
+--	--7: finish loop 4
+--	if (peek(0x5eca)>=4) poke(0x5ee6,1)
+-- --8: beat challenge mode
+end
+
+function upd_title()
+ menup=0
+ if (g_time<=100 and t_loop==0) cam_pos+=22/(g_time+11)
+ if will_start==0 and will_start_tut==0 then
+	 --if mousep==1 then
+	  if menu==0 then
+	   if (mousep==1) menu=1
+	  elseif menu==1 then
+	   if mousex>=26 and 
+	   mousey>=39 and
+	   mousex<=101 and
+	   mousey<=62 then
+	    if mousep==1 then
+	     if peek(0x5ee0)==0 then
+			    menup=3
+			    will_start_tut=1
+	     else
+			    menup=1
+			    will_start=1
+			   end
+		    sfx(60)
+		   else
+	     if peek(0x5eb6)==1 and peekbit(12)==0 then
+					  if peek(0x5eca)==0 then
+					   --new game
+			     new_hint_text(1,"start a new adventure in story\nmode!")
+					  elseif peek(0x5eca)==1 then
+					   --new game+
+			     new_hint_text(1,"new game+: harder battle groups.\nenemies have +5 hp and +1 att")
+					  else
+					   --new game++
+			     new_hint_text(1,"new game++: each time you beat\nthe game adds +5 hp and +1 att")
+					  end
+					 else
+			    new_hint_text(1,"continue your adventure!")					  
+					 end
+	    end
+	   elseif mousex>=38 and 
+	   mousey>=65 and
+	   mousex<=89 and
+	   mousey<=80 then
+	    if mousep==1 then
+		    menup=2
+		    if hint_c1 then
+		     clear_data()
+		     new_hint_text(70,"data cleared sucessfully!")
+			   else
+		     new_hint_text(130,"this will erase your progress.\nclick again to confirm",8,7)
+		    end
+		    sfx(60)
+		   end
+	   elseif mousex>=38 and 
+	   mousey>=84 and
+	   mousex<=89 and
+	   mousey<=99 then
+	    if mousep==1 then
+		    menup=3
+		    will_start_tut=1
+		    sfx(60)
+		   end
+	   elseif mousex>=38 and 
+	   mousey>=103 and
+	   mousex<=89 and
+	   mousey<=118 then
+	    --unlocked
+--				 new_hint_text(1,"see how far you can get!\n".."best:"..peek(0x5ee1).." last:"..peek(0x5ee2).." tries:"..peek(0x5ee3))
+     if mousep==1 then
+      --unlocked
+--		    menup=4
+--		    will_start=1
+--		    challenge_mode=1
+		    --locked
+--		    new_hint_text(70,"option unavailable in this\nversion")
+		    new_hint_text(70,"option unavailable.\njoin discord for the beta!")
+		    sfx(61)
+		   end
+	   end
+	  elseif menu==2 then
+    if mousep==1 then
+	    menu=1
+	   end
+	  end
+	 --end
+	elseif will_start>0 then
+  will_start+=1
+	 if (will_start>8) init_map()
+	elseif will_start_tut>0 then
+  will_start_tut+=1
+	 if will_start_tut>8 then
+		 music(-1,400)
+		 draw_fade_out()
+		 draw_fade_out()
+		 draw_fade_out()
+	  load("#jostu")
+	 end
+	end
+ if (g_time==500 and menu==0) music(-1,7000)
+ if (g_time==750 and menu==0) init_title()
+ camx1,camx2=sin(cam_pos/100)*-20+20,sin(cam_pos/100)*20-20
+end
+
+function upd_scene()
+ if mousep==1 then
+  if scene~=3 then
+   init_map()
+  else
+   if messagetim==nil and score_prog and score_prog>240 then
+    load("#jostitle")
+   end
+  end
+ end
+end
+-->8
+--update functions
+function bool_to_num(bool)
+ if (bool) return 1
+ return 0
+end
+
+function new_hint_text(tim,str,clr1,clr2)
+ hint_time=tim
+ hint_text=str
+ hint_c1=clr1
+ hint_c2=clr2
+end
+
+function new_message(num)
+ messagenum,messagetim,messagesz,messagetxt,messagechar=num,99,0,messg[num],messg_char[num]
+ if ((char_in[messagechar] or messagechar>6) and (messg_char2==nil or char_in[messg_char2[num]] or messg_char2[num]>6)) messagetim=0
+end
+
+function check_chars()
+ char_in={}
+ for i=1,6 do
+  local char=peek(0x5e7f+i)
+  char_in[char]=true
+ end
+end
+-->8
+--draw
+function _draw()
+	pal()
+	draw()
+	pal()
+	
+	if messagetim then
+	 --rectfill(52-messagesz,64-messagesz,76+messagesz,64+messagesz,1)
+	 rectfill(0,128-messagesz,128,128,1)
+	 if messagetim==4 then
+	  print(messagetxt,4+bool_to_num(messagechar>0)*25,94,7) xtspr(messagechar+16,to_tab_unp(",2,94,0,101,1,f,"))
+	  --if (messagechar>0) draw_char(messagechar,56,30)
+	 end
+	end
+	--mouse cursor
+	cam_x,cam_y=0,0
+	if (draw~=drw_scene)outline(xspr,0,1,4,mousex+1,mousey+1)
+
+ if hint_text and hint_time then
+  if hint_time>0 then
+   hint_time-=1
+   aux_text(hint_text,hint_c1,hint_c2)
+  else
+   hint_time,hint_c1=nil
+  end
+ end
+ --?#messgs[4],0,0,0
+-- for i=1,18 do
+--  ?#item_txt[i],flr((i-1)/6)*20+20,(i-1)%6*6
+-- end
+ if world==2 then
+ 	for i=1,15 do
+		 if (i~=10) poke(0x5f10+i,0x80+i)
+		end
+ end
+ if (peek(0x5ee4)==1) spr(236,120,0)
+ --?#(messgs[4].."oxffff.ffff"),0,0,0
+end
+
+function drw_title()
+ camera(0,cam_pos/2-40)
+ if world==1 then
+  draw_chain(",1,12,|,4,0x5a5a.8,|,3,0,2,128,4,6,|,4,|,3,0,-100,128,1,6,|,")
+ elseif world==2 then
+  pal(3,1) pal(11,3) pal(13,0) pal(6,1) pal(1,0) pal(12,2) draw_chain(",1,2,|,4,0x5a5a.8,|,3,0,2,128,4,6,|,4,|,3,0,-100,128,1,6,|,")
+ end
+ if world==3 then
+  cls(1)
+ else
+	 --mountains
+	 for j=1,40 do
+	  local i=0
+	  while i<=7 do
+	   local k=i%2*2
+	   rect(i*20-j,j+k*2,i*20+j,j+k*2,3+k*5)
+	  	i+=2
+	  if (i==8) i=1
+	  end
+	 end
+	 draw_chain(",3,0,39,128,128,3,|,")
+	 --far
+	 checkered_floor(camx1,to_tab_unp(",10,5,-4,7,11,15,8,4,7,3,5,"))
+	 draw_chain(",3,0,34,128,36,3,|,3,0,76,128,120,3,|,4,0x5a5a.8,|,3,0,34,128,40,3,|,3,0,72,128,80,3,|,4,|,")
+	 for i=1,10 do
+	  for j=1,10 do
+	   local hh,ww=1,1
+	   local tile=tonum(map_tile[world][i][j])
+	   if (tile==5) hh=2
+	   if (tile==-2) hh=2 ww=2
+	   if (tile==7) palt(0,false) palt(11,true)
+	   if ((tile<8 or tile==11) and tile~=0 and (tile~=5 or world==1)) spr(tile+191+world*16,i*10-1+camx1,j*5+33-hh*8,ww,hh)
+	   pal()
+	  end
+	 end
+ end
+ if (world==2) pal(3,1) pal(11,3) pal(1,0)
+ --close
+ camyy=cam_pos*1.5-115
+ camera(0,camyy)
+ draw_chain(",3,0,79,128,128,11,|,")
+ clip(0,195-cam_pos*1.5,128,128)
+ checkered_floor(camx2,to_tab_unp(",16,10,0,8,9,12,8,4,7,3,3,"))
+ if world==3 then
+  clip(0,0,128,195-cam_pos*1.5)
+  checkered_floor(camx2,to_tab_unp(",16,5,0,-14,9,15,8,1,7,1,5,"))
+  checkered_floor(camx2,to_tab_unp(",16,5,0,-14,9,15,9,1,6,3,5,"))
+  checkered_floor(camx2,to_tab_unp(",16,5,0,-14,9,15,9,2,6,-2,13,"))
+  rectfill(camx2+8,10,camx2+71,80,1)
+  checkered_floor(camx2,to_tab_unp(",6,2,2,7,11,18,5,2,2,0,5,"))
+  for j=10,60 do
+	  local clr=0
+	  local t,nn,i,jj,cc,n=0,0,0,80-j
+	  if (cos(80/j)>.0001) nn=1
+	  while (i<40) do
+	   n=i
+	   nn+=1
+	   t+=1
+	   i+=j/2
+	   local clr1,clr2=(clr+nn)%2,(clr+nn+1)%2
+	   if t<3 then clr1,clr2=clr1*6+2,clr2*6+2
+	   else clr1+=5 clr2+=5
+	   end
+	   rectfill(camx2+40+n,j+30,camx2+i+40,j+30,clr1)
+	   rectfill(camx2+40-n,j+30,camx2-i+40,j+30,clr2)
+	  end
+  end
+	 line(camx2+32,40,camx2-8,80,10)
+	 line(camx2+48,40,camx2+88,80,10)
+	 rectfill(camx2,11,camx2+8,80,4)
+	 rectfill(camx2+6,11,camx2+8,80,2)
+	 rectfill(camx2+4,11,camx2+4,80,2)
+	 rectfill(camx2+72,11,camx2+103,80,4)
+	 rectfill(camx2+72,11,camx2+74,80,2)
+	 for i=1,5 do
+	  rectfill(camx2+70+i*6,11,camx2+70+i*6,80,2)
+	 end
+	 sspr(24,64,11,14,camx2+35,27)
+ end
+ clip()
+ draw_chain(",2,0,79,128,79,1,|,")
+ pal()
+ palt(11,true)
+ palt(0,false)
+ --party
+ if (char_in[2]) xspr(6,camx2+28,75)
+ if (char_in[1]) xspr(5,camx2+9,71)
+ if (char_in[3]) xspr(7,camx2+1,91)
+ if (char_in[5]) xspr(9,camx2+41,107)
+ if (char_in[6]) xspr(10,camx2+35,94)
+ if (char_in[4]) xspr(8,camx2+14,107)
+ camera(0,camyy)
+ 
+ --xspr(36,camx2+9,71)
+ --chars
+ --local xc,yc=to_tab_unp(",0,20,40,50,75,90,"),to_tab_unp(",0,90,80,90,70,80,")
+ --for i=2,#party do
+  --sspr(party[i]*16,32,16,16,camx2+xc[i],yc[i],true)
+  --draw_char(party[i],xc[i],yc[i])
+ --end
+ --camera()
+ --title
+ pal()
+ cam()
+ 
+ --title
+ if menu==0 then
+	 monoc=1
+	 outline(xspr,to_tab_unp(",1,1,1,46,32,"))
+	 outline(xspr,to_tab_unp(",1,1,2,58,44,"))
+	 outline(xspr,to_tab_unp(",1,1,3,38,51,"))
+	 monoc=nil
+	 outline(xspr,to_tab_unp(",1,1,1,46,29,"))
+	 outline(xspr,to_tab_unp(",1,1,2,58,41,"))
+	 outline(xspr,to_tab_unp(",1,1,3,38,48,"))
+	 --click to start
+	 if g_time>60 then
+	  if (g_time%20<12) print(to_tab_unp(",click to start,36,80,7,"))
+	 end
+	elseif menu==1 then
+	 --new/continue
+	 filltr(26,39,100,62,3,1+bool_to_num(menup==1))
+	 rect(27,40,100,61,10)
+	 if peek(0x5eb6)==1 and peekbit(12)==0 then
+	  if peek(0x5eca)==0 then
+	   --new game
+	  	outline(sspr,1,1,16,87,55,9,36,46)
+	  elseif peek(0x5eca)==1 then
+	   --new game+
+ 	  outline(sspr,1,1,16,87,62,9,34,46) 
+	  else
+	   --new game++
+	   outline(sspr,1,1,16,87,62,9,30,46) 
+	   outline(sspr,1,1,72,88,7,7,93,47) 
+	  end
+  else
+	  outline(sspr,1,1,16,78,52,9,38,46)   
+  end
+	 --clear data
+	 filltr(38,65,89,80,3,1+bool_to_num(menup==2))
+	 rect(39,66,88,79,10)
+	 outline(print,1,1,"clear data",44,71,10)
+	 outline(print,1,1,"clear data",44,70,10)
+	 print("clear data",44,71,4)
+	 print("clear data",44,70,10)
+	 
+	 --tutorial
+	 filltr(38,84,89,99,3,1+bool_to_num(menup==3))
+	 rect(39,85,88,98,10)
+	 outline(print,1,1," tutorial",44,90,6)
+	 outline(print,1,1," tutorial",44,89,6)
+	 print(" tutorial",44,90,4)
+	 print(" tutorial",44,89,10)
+	 
+	 --challenge mode
+	 filltr(38,103,89,118,5,1+bool_to_num(menup==4))
+	 rect(39,104,88,117,13)
+	 outline(print,5,1,"challenge",45,109,6)
+	 outline(print,5,1,"challenge",45,108,6)
+	 print("challenge",45,109,13)
+	 print("challenge",45,108,6)
+	 
+	 --achievements
+--	 outline(spr,2,0,223,115,105,1,2)
+ end
+ --by bonevolt
+ if (g_time>60) print(to_tab_unp(",by bonevolt,80,121,7,"))
+-- for i=0,7 do
+--  if (peek(0x5ee0+i)>0) spr(240+i,i*10+2,2)
+-- end
+end
+
+function drw_scene()
+ --cls(1)
+ --local txt=scene_text[scene]
+ --print(txt,0,61,7)
+ 
+ if scene==1 then
+  cls()
+  srand(7)
+  rectfill(0,0,128,128,2)
+  for j=10,108 do
+	  local t,nn,i,jj,cc,n=0,0,0,j
+	  if (cos(180/j)>.0001) nn=1
+	  while (i<70) do
+	   local clr=1
+	   n=i
+	   nn+=1
+	   t+=1
+	   i+=j/3
+	   local clr1,clr2=(clr+nn)%2,(clr+nn+1)%2
+	   --if t<3 then clr1,clr2=clr1*6+2,clr2*6+2
+	   --else clr1+=5 clr2+=5
+	   --end
+	   rectfill(60+n,j+20,i+60,j+20,clr1*2+1)
+	   rectfill(60-n,j+20,-i+60,j+20,clr2*2+1)
+	  end
+  end
+  rectfill(0,40,128,50,1)
+  rectfill(0,0,128,6,1)
+  fillp(0x5faf.a)
+  rectfill(0,12,128,18,1)
+  fillp(0x5a5a.a)
+  rectfill(0,50,128,56,1)
+  rectfill(0,50,47,65,1)
+  rectfill(111,50,128,66,1)
+  rectfill(0,0,128,12,1)
+  fillp()
+  pal(3,1)
+  for j=0,9,3 do
+   if (j>3) pal()
+   for i=0,128,6 do
+    spr(224,i,24+j+rnd(4))
+   end
+  end
+  for j=0,6,2 do
+	  for i=-15,128,14 do
+	   if i+j*2<32 or i-j*2>72 or j==0 then
+	    if j<6 then
+	    	spr(128,i+rnd(7),34+j+rnd(4),2,2,false,false,4,4)
+	    else
+	    	sspr(0,64,16,16,i+rnd(7),24+j+rnd(4),32,32)
+	    end
+	   end
+	  end
+  end
+  if (messagenum==2) jackspr=11 jackf=true
+  if (messagenum==5) jackf=false
+  if (messagenum==6) clubspr=8 clubf=true
+  if (messagenum==7) clubspr=14 clubf=false
+  if (messagenum==8) jokerspr=10
+  
+  spr(130,75,60)
+  palt(0,false)
+  palt(11,true)
+  xspr(jackspr,60,60,jackf)
+  xspr(jokerspr,-2,63)
+  xspr(15,27,60)
+  xspr(12,20,70)
+  xspr(13,40,70)
+  xspr(clubspr,0,73,clubf)
+ elseif scene==2 then
+  camx2=16
+  cls(1)
+  checkered_floor(camx2-16,to_tab_unp(",16,5,0,-14,9,15,8,1,7,1,5,"))
+  checkered_floor(camx2-16,to_tab_unp(",16,5,0,-14,9,15,9,1,6,3,5,"))
+  checkered_floor(camx2-16,to_tab_unp(",16,5,0,-14,9,15,9,2,6,-2,13,"))
+  rectfill(camx2+8,10,camx2+71,80,1)
+  checkered_floor(camx2,to_tab_unp(",6,2,2,7,11,18,5,2,2,0,5,"))
+  local maxx,wav=40,80
+  for j=10,112 do
+	  local clr=0
+	  local t,nn,i,jj,cc,n=0,0,0,80-j
+	  if (cos(wav/j)>.0001) nn=1
+	  while (i<maxx) do
+	   n=i
+	   nn+=1
+	   t+=1
+	   i+=j/2
+	   local clr1,clr2=(clr+nn)%2,(clr+nn+1)%2
+	   if j>50 then
+	    maxx=75
+	    wav=170
+     if j>50 then
+		    clr1=clr1*8+3
+		    clr2=clr2*8+3
+		   end
+	   else
+		   if t<3 then clr1,clr2=clr1*6+2,clr2*6+2
+		   else clr1+=5 clr2+=5
+	   	end
+	   end
+	   rectfill(camx2+40+n,j+30,camx2+i+40,j+30,clr1)
+	   rectfill(camx2+40-n,j+30,camx2-i+40,j+30,clr2)
+	  end
+  end
+	 line(camx2+32,40,camx2-8,80,10)
+	 line(camx2+48,40,camx2+88,80,10)
+	 rectfill(camx2-22,11,camx2+8,80,4)
+	 rectfill(camx2+6,11,camx2+8,80,2)
+	 --rectfill(camx2+4,11,camx2+4,80,2)
+	 rectfill(camx2+72,11,camx2+103,80,4)
+	 rectfill(camx2+72,11,camx2+74,80,2)
+	 for i=1,5 do
+	  rectfill(camx2+70+i*6,11,camx2+70+i*6,80,2)
+	  rectfill(camx2-26+i*6,11,camx2-26+i*6,80,2)
+	 end
+	 sspr(24,64,11,14,camx2+35,27)
+	 
+  palt(0,false)
+  palt(11,true)
+  xspr(jackspr,35,68)
+  xspr(12,55,77,true,false)
+  xspr(16,70,80,true,false)
+  xspr(15,3,75)
+  xspr(13,20,90)
+  xspr(14,15,73)
+  if messg_char[messagenum]==7 and lancex>90 then
+   lancex-=5
+   jackspr=11
+  end
+  if (messagenum>3 and lancex<128) lancex+=5 lancef=false
+  palt(10,true)
+  xspr(26,lancex,lancey,lancef)
+  palt()
+ elseif scene==3 then
+  cls(bgc)
+  if messagenum==10 then
+   if messagetim==0 then
+    for i=0,15 do flip() end
+    fade_out(0) 
+    for i=0,75 do flip() end
+   end
+   bgc=0
+  elseif messagenum==15 then
+   if messagetim==nil then
+    if photo==nil then
+	    for i=0,15 do flip() end
+	    fade_out(16)
+	    photo=0
+	    photoy=32
+    else
+     if (photo==0) rectfill(0,32,128,95,7) flip()
+     while photo<5 do
+	     for i=0x2000,0x3000 do
+	      local clr=peek(i)%16
+	      for i=1,4-photo do
+	       clr=fade_c[clr+16]
+	      end
+	      poke(i+0x2300,clr)
+	      local clr=flr(peek(i)/16)
+	      for i=1,4-photo do
+	       clr=fade_c[clr+16]
+	      end
+	      poke(i+0x2300,peek(i+0x2300)+clr*16)
+	     end
+	     for i=1,8 do flip() end
+	     memcpy(0x6800,0x4300,0x1000)
+      photo+=1
+     end
+     rectfill(0,64,128,128-photoy*2,1)
+	    memcpy(0x6000+photoy*64,0x4300,0x1000)
+	    if photoy>0 then
+	     photoy-=1
+	     score_prog=0
+	    else
+	     if (score_prog<1000) score_prog+=1
+	     if (mousep==1) score_prog+=10
+		    chars_unl=0
+		    for i=0x5e81,0x5e85 do
+		     if (peek(i)>0 and score_prog/5+0x5e80>i) chars_unl+=1
+		    end
+		    battleswon=min(peek(0x5ecb)+peek(0x5ecc)+peek(0x5ecd),(score_prog-30)*3)
+		    tilesexp=min(peek(0x5ece)+peek(0x5ecf)+peek(0x5ed0),(score_prog-60)*12)
+		    itemsacq=min(peek(0x5eb2)+bool_to_num(peek(0x5e8d)==7)+peekbit(200),(score_prog-90))
+		    totalperc=min(chars_unl+battleswon+tilesexp/20+itemsacq,(score_prog-120))
+		    print("characters unlocked:"..chars_unl.."/5",6,68,13)
+		    if score_prog>30 then
+		    print("battles won:"..battleswon.."/60",6,76)
+		    if score_prog>60 then
+		    print("tiles explored:"..tilesexp.."/300",6,84)
+		    --if score_prog>90 then
+		    --print("bosses defeated:2/2",6,92)
+		    if score_prog>90 then
+		    print("items acquired:"..itemsacq.."/20",6,92)
+		    if score_prog>120 then
+		    compltxt="completion:"..totalperc.."%"
+		    if (peek(0x5eca)>=2 and score_prog>230) compltxt=compltxt.."+"
+		    if (peek(0x5eca)>2 and score_prog>240) compltxt=compltxt.."+"
+		    print(compltxt,6,113,7)
+		    if (totalperc>=100) poke(0x5ee2,1)
+		    end
+		    end
+		    end
+		    end
+		    rectfill(0,0,95,5,0)
+		    print("credit screen wip. sorry",0,0,7)
+	    end
+    end
+   end
+  end
+	end
+end
+-->8
+--draw functions
+function draw_chain(c)
+ local t=str_to_table(c)
+ for i=1,#t do
+ 	draw_funct[t[i][1]](unpack(t[i],2))
+ end
+end
+
+function draw_fade_out()
+ for i=0,11 do
+  flip()
+  rectfill(0,0,i*13,127,0)
+ end
+ fade_in=1
+end
+
+function aux_text(txt,c1,c2)
+ c1,c2=c1 or 1,c2 or 13
+ rectfill(0,115,130,128,c1)print(txt,2,116,c2)
+end
+
+function tpx(x,y,h,v)
+	local sc=band(pget(x,y),15)
+ local val=mid(0,v-1+c_val[sc],5)
+ pset(x,y,to_col[h+val*11])
+end
+
+--[[
+function tspr(s,x,y,w,h,phue,pval,tr)
+ local sx,sy=s%16*8,flr(s/16)*8
+	stspr(sx,sy,w*8,h*8,x,y,0,0,phue,pval,tr)
+end]]
+
+function stspr(sx,sy,w,h,x,y,dw,dh,phue,pval,tr,fl)
+ local func=tpx
+	if (pval>=99) func=pset
+ fl,tr=fl or false,tr or 0
+ 
+	for j=0,h-1 do
+		for i=0,w-1 do
+	  local pc=peek(flr((sx+i)/2)+(sy+j)*64)
+	  pc=(sx+i)%2==1 and flr(pc/16) or pc%16
+	  --local pc=sget(sx+i,sy+j)
+	  if (tr<99 and pc!=tr) or (tr>=99 and band(pc,tr-100)>0) then
+	   if (fl) i=-i+w-1
+	   if (pval>=99) phue=pc
+	   func(x+i,y+j,phue,pval)
+	  end
+	 end
+	end
+end
+
+function filltr(x1,y1,x2,y2,phue,pval)
+	for j=0x6000+y1*64,0x6000+y2*64,64 do
+		for i=j+flr(x1/2),j+flr(x2/2) do
+		 clr1=to_col[phue+mid(0,pval-1+c_val[peek(i)%16],5)*11]
+		 clr2=to_col[phue+mid(0,pval-1+c_val[flr(shr(peek(i),4))],5)*11]
+		 poke(i,clr2*16+clr1)		 
+	 end
+	end
+end
+
+function xfunc(func,n,x,y,...)
+ local n=sprv[n]
+ func(n[1],n[2],n[3],n[4],x,y,n[3],n[4],...)
+end
+
+function xtspr(...)
+ xfunc(stspr,...)
+end
+
+function xspr(...)
+	xfunc(sspr,...)
+end
+
+function outline(draw,c,t,...)
+ if c then
+  --t:0 normal t:1 bold
+  pal_all(c or outl)
+  for i=-1,1 do
+   for j=-1,1 do
+    if ((i==0 or j==0) and i~=j) or t==1 then
+     cam(i,j)
+     draw(...)
+    end
+   end
+  end
+ end
+ cam()
+ cpal()
+ pal(0,outl)
+ if ch_pal then
+	 for i=0,15 do
+	  pal(i,to_col[ch_pal+c_val[i]*11])
+	 end
+ end
+ ch_pal=nil
+ if (monoc) pal_all(monoc)
+ draw(...)
+ cpal()
+end
+
+function pal_all(p)
+ for i=0,15 do
+  pal(i,p)
+ end
+end
+
+function cpal()
+	for i=0,15 do
+		pal(i,i)
+	end
+end
+
+function hlight_area(x1,y1,x2,y2,cc)
+ local col=cc or 9+t22
+ x2,y2=x2 or x1,y2 or y1
+ rect(x1*16-8,y1*10+4,x2*16+7,y2*10+13,col)
+end
+
+function hlight_chars(algn)
+ local cc=14+t22
+	for ch in all (char) do
+  if ch.algn==algn or algn==3 then
+		 hlight_area(ch.tx,ch.ty,ch.tx,ch.ty,cc)
+		end
+ end
+ if algn==4 then
+  hlight_area(5,1,7,7,cc)
+ end
+end
+
+function fade_out(c)
+ for i=1,5 do
+  local n=0
+  for j=0,63 do
+   for k=0+c*2,127-c*2 do
+    function fd(j)
+    	pset(j,k,fade_c[pget(j,k)+c])
+    end
+    fd(j+c*4)
+    fd(127-j-c*4)
+   end
+   n+=1
+   if (n%32==16) flip()
+  end
+ end
+end

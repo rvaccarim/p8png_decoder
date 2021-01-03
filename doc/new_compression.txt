@@ -1,0 +1,39 @@
+Bytes:       235      193      205      79       240      0        239      112      247
+
+Ruler   0          1          2          3           4          5          6          7           8          9
+Ruler   01234567 89012345 67890123 45678901 23456789 01234567 89012345 67890123 45678901 23456789 01234567 89012345
+
+Inverted binary values
+Values  11010111 10000011 10110011 11110010 00001111 00000000 11110111 00001110 11101111 10000111 10100011 01110110
+
+        1
+        Header
+         10
+         unary           = 1 plus 1 pos because of read
+         unary_mask << 4 = 16 (10000, 5 pos)
+           11101 (invert 5 pos)
+           10000 (unary << 4)
+          ------
+          101101 (45 = "-", move 45 to front)
+
+                 1
+                 Header
+                  0
+                  unary           = 0 plus 1 pos because of read
+                  unary_mask << 4 = 0 (0000, 4 pos)
+                   0000 (invert 4 pos)
+                   0000 (unary << 4)
+                   ----
+                   0000 (0 -> no need to swap the lookup table)
+
+                       1
+                        Header
+                        1 10
+                          unary           = 2 plus 1 pos because of read
+                          unary_mask << 4 = 48 (110000, 6 pos)
+                            110011 (invert 6 pos)
+                            110000 (unary << 4)
+                           -------
+                           1100011 (99 = "c", move 99 to front)
+
+
