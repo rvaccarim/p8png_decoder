@@ -1,5 +1,4 @@
 import unittest
-import tracemalloc
 from src.decoder import extract_code
 
 game_dir = "./0_games/"

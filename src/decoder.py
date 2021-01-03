@@ -15,24 +15,6 @@ class FORMAT(Enum):
     NEW_COMPRESSED_FORMAT = 3
 
 
-def get_index(address):
-    return address - 0x4300
-
-
-def get_version(code_segment):
-    # If the first four bytes are a null (\x00) followed by pxa, then the code is stored in the new (v0.2.0+)
-    # compressed format.
-    # If the first four bytes are :c: followed by a null (\x00), then the code is stored in the old (pre-v0.2.0)
-    # compressed format.
-    # In all other cases, the code is stored as plaintext (ASCII), up to the first null byte.
-    if bytes(code_segment[:4]) == b'\x00pxa':
-        return FORMAT.NEW_COMPRESSED_FORMAT
-    elif bytes(code_segment[:4]) == b':c:\x00':
-        return FORMAT.OLD_COMPRESSED_FORMAT
-    else:
-        return FORMAT.PLAINTEXT_FORMAT
-
-
 def unsteganize_png(width, height, rows, info):
     # Each PICO-8 byte is stored as the two least significant bits of each of the four color channels, ordered ARGB
     # (E.g: the A channel stores the 2 most significant bits in the bytes). The image is 160 pixels wide and 205 pixels
@@ -66,13 +48,27 @@ def unsteganize_png(width, height, rows, info):
     return hidden_data
 
 
-def get_code_plaintext(code_segment):
+def get_version(hidden_data):
+    # If the first four bytes are a null (\x00) followed by pxa, then the code is stored in the new (v0.2.0+)
+    # compressed format.
+    # If the first four bytes are :c: followed by a null (\x00), then the code is stored in the old (pre-v0.2.0)
+    # compressed format.
+    # In all other cases, the code is stored as plaintext (ASCII), up to the first null byte.
+    if bytes(hidden_data[0x4300:0x4304]) == b'\x00pxa':
+        return FORMAT.NEW_COMPRESSED_FORMAT
+    elif bytes(hidden_data[0x4300:0x4304]) == b':c:\x00':
+        return FORMAT.OLD_COMPRESSED_FORMAT
+    else:
+        return FORMAT.PLAINTEXT_FORMAT
+
+
+def get_code_plaintext(hidden_data):
     # the code is stored as plaintext (ASCII), up to the first null byte
     code = []
     code_pos = 0x4300
 
     while code_pos < 0x8000:
-        curr_byte = code_segment[get_index(code_pos)]
+        curr_byte = hidden_data[code_pos]
         if curr_byte == 0:
             break
 
@@ -82,25 +78,25 @@ def get_code_plaintext(code_segment):
     return "".join(code) + "\n"
 
 
-def get_code_oldcompression(code_segment):
+def get_code_oldcompression(hidden_data):
     CHAR_TABLE = ' \n 0123456789abcdefghijklmnopqrstuvwxyz!#%(){}[]<>+=/*:;.,~_'
 
     # bytes 0x4304-0x4305 are the length of the decompressed code, stored MSB first.
-    decompressed_length = (code_segment[get_index(0x4304)] << 8) | code_segment[get_index(0x4305)]
+    decompressed_length = (hidden_data[0x4304] << 8) | hidden_data[0x4305]
 
     # The next two bytes (0x4306-0x4307) are always zero.
-    assert code_segment[get_index(0x4306)] == 0
-    assert code_segment[get_index(0x4307)] == 0
+    assert hidden_data[0x4306] == 0
+    assert hidden_data[0x4307] == 0
 
     code = []
     code_pos = 0x4308
 
-    while len(code) < decompressed_length and (code_pos - 0x4300) < len(code_segment):
-        curr_byte = code_segment[get_index(code_pos)]
+    while len(code) < decompressed_length:
+        curr_byte = hidden_data[code_pos]
 
         if curr_byte == 0x00:
             # 0x00: Copy the next byte directly to the output stream.
-            code.append(chr(code_segment[get_index(code_pos + 1)]))
+            code.append(chr(hidden_data[code_pos + 1]))
             code_pos += 2
 
         elif curr_byte <= 0x3b:
@@ -112,7 +108,7 @@ def get_code_oldcompression(code_segment):
             # 0x3c-0xff: Calculate an offset and length from this byte and the next byte, then copy those bytes from
             # what has already been emitted. In other words, go back "offset" characters in the output stream,
             # copy "length" characters, then paste them to the end of the output stream.
-            next_byte = code_segment[get_index(code_pos + 1)]
+            next_byte = hidden_data[code_pos + 1]
 
             # according to the spec
             offset = (curr_byte - 0x3c) * 16 + (next_byte & 0xf)
@@ -148,16 +144,16 @@ def read_bits(positions):
     return inv_bits
 
 
-def get_code_newcompression(code_segment):
+def get_code_newcompression(hidden_data):
     global stream_pos, stream_str
     code_str = ""
 
     # bytes 0x4304-0x4305 are the length of the decompressed code, stored MSB first.
-    decompressed_code_length = (code_segment[get_index(0x4304)] << 8) | code_segment[get_index(0x4305)]
+    decompressed_code_length = (hidden_data[0x4304] << 8) | hidden_data[0x4305]
 
     # The next two bytes (0x4306-0x4307) are the length of the compressed 1_expected + 8 for this 8-byte header,
     # stored MSB first.
-    compressed_data_length = code_segment[get_index(0x4306)] << 8 | code_segment[get_index(0x4307)]
+    compressed_data_length = hidden_data[0x4306] << 8 | hidden_data[0x4307]
 
     # The decompression algorithm maintains a "move-to-front" mapping of the 256 possible bytes.
     # Initially, each of the 256 possible bytes maps to itself.
@@ -170,9 +166,9 @@ def get_code_newcompression(code_segment):
     # We create a string with all bytes inverted to simulate the decoding stream
     stream = []
     code_pos = 0x4308
-    while (code_pos - 0x4300) < len(code_segment):
+    while code_pos < 0x8000:
         # convert to binary and reverse
-        stream.append(format(code_segment[get_index(code_pos)], '08b')[::-1])
+        stream.append(format(hidden_data[code_pos], '08b')[::-1])
         code_pos += 1
 
     stream_str = "".join(stream)
@@ -282,16 +278,15 @@ def extract_code(filename):
     # The image should be 160w x 205h pixels
     if width == 160 and height == 205:
         hidden_data = unsteganize_png(width, height, rows, info)
-        code_segment = hidden_data[0x4300:0x8000]
-        version = get_version(code_segment)
+        version = get_version(hidden_data)
         print(version.name)
 
         if version == FORMAT.PLAINTEXT_FORMAT:
-            code = get_code_plaintext(code_segment)
+            code = get_code_plaintext(hidden_data)
         elif version == FORMAT.OLD_COMPRESSED_FORMAT:
-            code = get_code_oldcompression(code_segment)
+            code = get_code_oldcompression(hidden_data)
         else:
-            code = get_code_newcompression(code_segment)
+            code = get_code_newcompression(hidden_data)
     else:
         code = "Wrong card size"
 
